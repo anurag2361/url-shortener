@@ -100,27 +100,6 @@ Method: GET
 
 ### QR Code Operations
 
-#### Generate QR Code
-
-Generates a QR code for a URL.
-
-```
-URL: /qr/{code}
-Method: GET
-```
-
-**Path Parameters:**
-
-- `code` - The short code of the URL
-
-**Query Parameters:**
-
-- `url_type` - Type of URL to encode (optional, default: "shortened")
-  - `original` - Original URL
-  - `shortened` - Shortened URL
-
-**Response:** SVG image of the QR code (Content-Type: image/svg+xml)
-
 #### Regenerate QR Code
 
 Regenerates a QR code for a URL.
@@ -197,42 +176,16 @@ Method: GET
 
 ```json
 {
-  "url": {
-    "original_url": "https://example.com/page1",
-    "short_url": "https://mms.io/abc123",
-    "short_code": "abc123",
-    "created_at": 1649203200000,
-    "expires_at": 1649289600000
-  },
-  "clicks": 42,
-  "visitors": {
-    "unique": 28,
-    "returning": 14
-  },
-  "referrers": [
-    { "source": "direct", "count": 20 },
-    { "source": "twitter.com", "count": 15 },
-    { "source": "facebook.com", "count": 7 }
-  ],
-  "browsers": [
-    { "name": "Chrome", "count": 25 },
-    { "name": "Firefox", "count": 10 },
-    { "name": "Safari", "count": 7 }
-  ],
-  "devices": [
-    { "type": "desktop", "count": 30 },
-    { "type": "mobile", "count": 12 }
-  ],
-  "countries": [
-    { "code": "US", "count": 20 },
-    { "code": "UK", "count": 8 },
-    { "code": "CA", "count": 6 }
-  ],
-  "click_history": [
-    { "date": "2023-01-01", "count": 10 },
-    { "date": "2023-01-02", "count": 15 },
-    { "date": "2023-01-03", "count": 17 }
-  ]
+  "short_code": "Wp0IEE",
+  "original_url": "https://google.com",
+  "created_at": 1743600511583,
+  "expires_at": 1744205311583,
+  "clicks": 1,
+  "unique_clicks": 1,
+  "has_shortened_qr": false,
+  "has_original_qr": false,
+  "shortened_qr_generated_at": null,
+  "original_qr_generated_at": null
 }
 ```
 
@@ -243,7 +196,7 @@ Method: GET
 Checks if the API is running.
 
 ```
-URL: /health
+URL: /health/check
 Method: GET
 ```
 
