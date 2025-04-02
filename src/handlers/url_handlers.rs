@@ -1,4 +1,4 @@
-use actix_web::{HttpResponse, Responder, Result, error, http, web};
+use actix_web::{HttpRequest, HttpResponse, Responder, Result, error, http, web};
 use futures_util::StreamExt;
 use mongodb::bson::doc;
 use nanoid::nanoid;
@@ -7,6 +7,7 @@ use validator::Validate;
 
 use crate::models::url::ShortenedUrl;
 use crate::state::app_state::AppState;
+use crate::utils::hash_ip::hash_ip;
 
 #[derive(Deserialize, Serialize, Validate)]
 pub struct UrlRequest {
@@ -25,6 +26,8 @@ pub struct UrlListResponse {
     pub expires_at: Option<i64>,
     pub has_qr_code: bool,
     pub qr_code_generated_at: Option<i64>,
+    pub clicks: i64,          // Add click count to the response
+    pub unique_clicks: usize, // Count of unique visitors
 }
 
 #[derive(Serialize)]
@@ -38,6 +41,18 @@ pub struct UrlResponse {
 #[derive(Deserialize)]
 pub struct UrlSearchParams {
     pub search: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UrlAnalyticsResponse {
+    pub short_code: String,
+    pub original_url: String,
+    pub created_at: Option<i64>,
+    pub expires_at: Option<i64>,
+    pub clicks: i64,
+    pub has_qr_code: bool,
+    pub qr_code_generated_at: Option<i64>,
+    pub unique_clicks: usize,
 }
 
 /// Create a shortened URL
@@ -100,6 +115,7 @@ pub async fn create_short_url(
 /// Redirect to original URL
 pub async fn redirect_to_url(
     app_state: web::Data<AppState>,
+    req: HttpRequest,
     path: web::Path<String>,
 ) -> Result<impl Responder> {
     let code = path.into_inner();
@@ -121,8 +137,37 @@ pub async fn redirect_to_url(
                 })));
             }
 
+            // Get visitor's IP address
+            let ip = req
+                .connection_info()
+                .realip_remote_addr()
+                .unwrap_or("unknown")
+                .to_string();
+
+            // Create a unique visitor identifier by hashing the IP
+            let visitor_hash = hash_ip(&ip);
+
+            // Increment the click counter asynchronously
+            // We don't wait for the result to avoid slowing down the redirect
+            let original_url = url.original_url.clone();
+            let code_clone = code.clone();
+
+            // Update click count and unique visitors in the background
+            actix_web::rt::spawn(async move {
+                // Increment the click counter and add the visitor hash if it's new
+                let _ = urls_collection
+                    .update_one(
+                        doc! {"short_code": code_clone},
+                        doc! {
+                            "$inc": {"clicks": 1},
+                            "$addToSet": {"unique_visitors": visitor_hash}
+                        },
+                    )
+                    .await;
+            });
+
             Ok(HttpResponse::Found()
-                .append_header((http::header::LOCATION, url.original_url))
+                .append_header((http::header::LOCATION, original_url))
                 .finish())
         }
         None => Ok(HttpResponse::NotFound().body("Short URL not found")),
@@ -171,6 +216,8 @@ pub async fn get_all_urls(
                 expires_at: url.expires_at,
                 has_qr_code: url.qr_code_svg.is_some(),
                 qr_code_generated_at: url.qr_code_generated_at,
+                clicks: url.clicks,                       // Include click count
+                unique_clicks: url.unique_visitors.len(), // Count of unique visitors
             });
         }
     }
@@ -204,5 +251,41 @@ pub async fn get_qr_code_direct(
             }
         }
         None => Ok(HttpResponse::NotFound().body("URL not found")),
+    }
+}
+
+/// Get analytics for a specific URL
+pub async fn get_url_analytics(
+    app_state: web::Data<AppState>,
+    path: web::Path<String>,
+) -> Result<impl Responder> {
+    let code = path.into_inner();
+    let db = &app_state.db;
+    let urls_collection = db.collection::<ShortenedUrl>("urls");
+
+    // Find the URL by short code
+    let url_doc = urls_collection
+        .find_one(doc! {"short_code": &code})
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+    match url_doc {
+        Some(url) => {
+            let analytics = UrlAnalyticsResponse {
+                short_code: url.short_code,
+                original_url: url.original_url,
+                created_at: url.created_at,
+                expires_at: url.expires_at,
+                clicks: url.clicks,
+                has_qr_code: url.qr_code_svg.is_some(),
+                qr_code_generated_at: url.qr_code_generated_at,
+                unique_clicks: url.unique_visitors.len(), // Count of unique visitors
+            };
+
+            Ok(HttpResponse::Ok().json(analytics))
+        }
+        None => Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": "URL not found"
+        }))),
     }
 }

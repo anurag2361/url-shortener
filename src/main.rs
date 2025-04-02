@@ -3,6 +3,7 @@ mod handlers;
 mod models;
 mod routes;
 mod state;
+mod utils;
 
 use crate::state::app_state::AppState;
 use actix_web::{App, HttpServer, middleware::Logger, web};

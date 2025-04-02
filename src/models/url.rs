@@ -15,6 +15,10 @@ pub struct ShortenedUrl {
     pub qr_code_svg: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qr_code_generated_at: Option<i64>,
+    #[serde(default)]
+    pub clicks: i64, // Number of clicks/redirects tracked
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unique_visitors: Vec<String>, // Store hashed IPs for unique visitors
 }
 
 impl ShortenedUrl {
@@ -30,6 +34,8 @@ impl ShortenedUrl {
             expires_at,
             qr_code_svg: None,
             qr_code_generated_at: None,
+            clicks: 0,
+            unique_visitors: Vec::new(), // Initialize with an empty vector
         }
     }
 
@@ -38,5 +44,9 @@ impl ShortenedUrl {
             Some(expiry) => chrono::Utc::now().timestamp_millis() > expiry,
             None => false, // No expiration date means it never expires
         }
+    }
+
+    pub fn unique_visitor_count(&self) -> usize {
+        self.unique_visitors.len()
     }
 }
