@@ -1,0 +1,21 @@
+[package]
+name = "makemeshort"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actix-web = "4.10.2"
+anyhow = "1.0.97"
+chrono = { version = "0.4.40", features = ["serde"] }
+dotenv = "0.15.0"
+env_logger = "0.11.7"
+image = "0.25.6"
+log = "0.4.27"
+mongodb = "3.2.3"
+nanoid = "0.4.0"
+qrcode = "0.14.1"
+rand = "0.9.0"
+serde = "1.0.219"
+serde_json = "1.0.140"
+tokio = "1.44.1"
+validator = { version = "0.20.0", features = ["derive"] }
