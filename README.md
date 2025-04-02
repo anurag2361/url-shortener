@@ -16,7 +16,7 @@ MakeMeShort is a powerful URL shortening service with advanced features includin
 ## Base URL
 
 ```
-https://api.makemeshort.com/v1
+localhost:8080/api/
 ```
 
 ## Endpoints
@@ -37,7 +37,7 @@ Method: POST
 ```json
 {
   "url": "https://example.com/very/long/url/that/needs/shortening",
-  "expiration": 86400 // Optional: expiration in seconds
+  "expires_in_days": 7 // Optional: expiration in days
 }
 ```
 
@@ -48,8 +48,7 @@ Method: POST
   "original_url": "https://example.com/very/long/url/that/needs/shortening",
   "short_url": "https://mms.io/abc123",
   "short_code": "abc123",
-  "expires_at": 1649289600000, // Timestamp in milliseconds, null if no expiration
-  "created_at": 1649203200000 // Timestamp in milliseconds
+  "expires_at": 1649289600000 // Timestamp in milliseconds, null if no expiration
 }
 ```
 
@@ -69,29 +68,19 @@ Method: GET
 **Response:**
 
 ```json
-{
-  "urls": [
-    {
-      "original_url": "https://example.com/page1",
-      "short_url": "https://mms.io/abc123",
-      "short_code": "abc123",
-      "expires_at": 1649289600000,
-      "created_at": 1649203200000,
-      "clicks": 42
-    },
-    {
-      "original_url": "https://example.com/page2",
-      "short_url": "https://mms.io/def456",
-      "short_code": "def456",
-      "expires_at": null,
-      "created_at": 1649203200000,
-      "clicks": 17
-    }
-  ],
-  "total": 2,
-  "page": 1,
-  "per_page": 10
-}
+[
+  {
+    "id": "67ed3b7ff4867055144c4759",
+    "original_url": "https://example.com/very/long/url/that/needs/shortening",
+    "short_code": "Wp0IEE",
+    "created_at": 1743600511583,
+    "expires_at": 1744205311583,
+    "has_shortened_qr": false,
+    "has_original_qr": false,
+    "clicks": 0,
+    "unique_clicks": 0
+  }
+]
 ```
 
 #### Redirect to Original URL
@@ -168,6 +157,24 @@ Method: GET
 **Query Parameters:**
 
 - `url_type` - Type of URL to retrieve (optional, default: "shortened")
+
+**Response:** SVG image of the QR code (Content-Type: image/svg+xml)
+
+#### Generate QR Code Directly
+
+Generates a QR code for any URL without requiring it to be shortened first.
+
+- **URL**: `/qr`
+- **Method**: `POST`
+- **Request Body**:
+
+```json
+{
+  "url": "https://example.com",
+  "size": 300, // Optional, default is 200
+  "force_regenerate": false // Optional, default is false
+}
+```
 
 **Response:** SVG image of the QR code (Content-Type: image/svg+xml)
 

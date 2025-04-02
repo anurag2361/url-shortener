@@ -4,10 +4,12 @@ use mongodb::options::{FindOneAndUpdateOptions, ReturnDocument};
 use qrcode::QrCode as QrCodeGenerator;
 use qrcode::render::svg;
 use serde::Deserialize;
+use validator::Validate;
 
 use crate::models::qr_code::{QrCode as QrCodeModel, TargetType};
 use crate::models::url::ShortenedUrl;
 use crate::state::app_state::AppState;
+use crate::structs::qr_request::CreateQrRequest;
 
 #[derive(Deserialize)]
 pub struct QrRequest {
@@ -222,4 +224,102 @@ pub async fn regenerate_qr(
         }
         None => Ok(HttpResponse::NotFound().body("URL not found")),
     }
+}
+
+/// Generate QR code directly from a URL without requiring a short code
+pub async fn generate_direct_qr(
+    app_state: web::Data<AppState>,
+    web::Json(req): web::Json<CreateQrRequest>,
+) -> Result<impl Responder> {
+    // Validate the URL
+    if let Err(errors) = req.validate() {
+        return Ok(HttpResponse::BadRequest().json(errors));
+    }
+
+    let db = &app_state.db;
+    let qr_codes_collection = db.collection::<QrCodeModel>("qr_codes");
+
+    // First check if we already have a QR code for this URL
+    let existing_qr = qr_codes_collection
+        .find_one(doc! {
+            "original_url": &req.url,
+            "short_code": { "$regex": "^direct-" }, // Find direct QR codes
+            "target_type": "original"
+        })
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+    // Check if QR exists and handle regeneration
+    let has_existing_qr = existing_qr.is_some();
+    if has_existing_qr {
+        if !req.force_regenerate.unwrap_or(false) {
+            return Ok(HttpResponse::Ok()
+                .content_type("image/svg+xml")
+                .body(existing_qr.unwrap().svg_content));
+        }
+    }
+
+    // Set dimensions (default or from request)
+    let dimensions = req.size.unwrap_or(200);
+
+    // Generate QR code
+    let qr_code = QrCodeGenerator::new(req.url.as_bytes())
+        .map_err(|e| error::ErrorInternalServerError(format!("QR code generation error: {}", e)))?;
+
+    // Render as SVG
+    let svg_output = qr_code
+        .render::<svg::Color>()
+        .min_dimensions(dimensions, dimensions)
+        .quiet_zone(true)
+        .build();
+
+    // Generate a unique ID for this direct QR code
+    let unique_id = format!(
+        "direct-{}",
+        uuid::Uuid::new_v4().to_string().split('-').next().unwrap()
+    );
+
+    // Create the QR code model
+    let qr_model = QrCodeModel::new(
+        unique_id.clone(),
+        req.url.clone(),
+        svg_output.clone(),
+        TargetType::Original, // Direct QR codes always point to the original URL
+    );
+
+    // Save the QR code to the database (upsert if it already exists)
+    if existing_qr.is_some() {
+        // Update existing QR code
+        qr_codes_collection
+            .update_one(
+                doc! {
+                    "original_url": &req.url,
+                    "short_code": { "$regex": "^direct-" },
+                    "target_type": "original"
+                },
+                doc! {
+                    "$set": {
+                        "svg_content": &svg_output,
+                        "generated_at": chrono::Utc::now().timestamp_millis(),
+                    }
+                },
+            )
+            .await
+            .map_err(|e| {
+                error::ErrorInternalServerError(format!("Failed to update QR code: {}", e))
+            })?;
+    } else {
+        // Insert new QR code
+        qr_codes_collection
+            .insert_one(&qr_model)
+            .await
+            .map_err(|e| {
+                error::ErrorInternalServerError(format!("Failed to save QR code: {}", e))
+            })?;
+    }
+
+    // Return the SVG directly
+    Ok(HttpResponse::Ok()
+        .content_type("image/svg+xml")
+        .body(svg_output))
 }

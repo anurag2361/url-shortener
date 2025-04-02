@@ -3,6 +3,7 @@ mod handlers;
 mod models;
 mod routes;
 mod state;
+mod structs;
 mod utils;
 
 use crate::state::app_state::AppState;
