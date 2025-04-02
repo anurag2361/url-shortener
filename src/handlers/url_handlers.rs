@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::models::url::ShortenedUrl;
+use crate::models::url_visitor::UrlVisitor;
 use crate::state::app_state::AppState;
 use crate::utils::hash_ip::hash_ip;
 
@@ -147,23 +148,51 @@ pub async fn redirect_to_url(
             // Create a unique visitor identifier by hashing the IP
             let visitor_hash = hash_ip(&ip);
 
+            // Get optional user agent and referrer
+            let user_agent = req
+                .headers()
+                .get(http::header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .map(String::from);
+
+            let referrer = req
+                .headers()
+                .get(http::header::REFERER)
+                .and_then(|v| v.to_str().ok())
+                .map(String::from);
+
             // Increment the click counter asynchronously
             // We don't wait for the result to avoid slowing down the redirect
             let original_url = url.original_url.clone();
             let code_clone = code.clone();
+
+            let visitors_collection = db.collection::<UrlVisitor>("visitors");
 
             // Update click count and unique visitors in the background
             actix_web::rt::spawn(async move {
                 // Increment the click counter and add the visitor hash if it's new
                 let _ = urls_collection
                     .update_one(
-                        doc! {"short_code": code_clone},
+                        doc! {"short_code": &code_clone},
                         doc! {
                             "$inc": {"clicks": 1},
-                            "$addToSet": {"unique_visitors": visitor_hash}
                         },
                     )
                     .await;
+
+                // Then, check if this visitor has already visited this URL
+                let existing_visitor = visitors_collection
+                    .find_one(doc! {
+                        "short_code": &code_clone,
+                        "visitor_hash": &visitor_hash
+                    })
+                    .await;
+
+                if let Ok(None) = existing_visitor {
+                    // If this is a new visitor, add to the visitors collection
+                    let visitor = UrlVisitor::new(code_clone, visitor_hash, user_agent, referrer);
+                    let _ = visitors_collection.insert_one(&visitor).await;
+                }
             });
 
             Ok(HttpResponse::Found()
@@ -180,6 +209,7 @@ pub async fn get_all_urls(
 ) -> Result<impl Responder> {
     let db = &app_state.db;
     let urls_collection = db.collection::<ShortenedUrl>("urls");
+    let visitors_collection = db.collection::<UrlVisitor>("visitors");
 
     // Create filter based on search parameter
     let filter = match &query.search {
@@ -207,6 +237,15 @@ pub async fn get_all_urls(
             // Convert ObjectId to string
             let id_str = url.id.map(|oid| oid.to_hex());
 
+            // Get the short code
+            let short_code = url.short_code.clone();
+
+            // Count unique visitors for this URL
+            let unique_visitor_count = visitors_collection
+                .count_documents(doc! {"short_code": &short_code})
+                .await
+                .unwrap_or(0) as usize;
+
             // Create a simplified response without the SVG data
             urls.push(UrlListResponse {
                 id: id_str,
@@ -216,8 +255,8 @@ pub async fn get_all_urls(
                 expires_at: url.expires_at,
                 has_qr_code: url.qr_code_svg.is_some(),
                 qr_code_generated_at: url.qr_code_generated_at,
-                clicks: url.clicks,                       // Include click count
-                unique_clicks: url.unique_visitors.len(), // Count of unique visitors
+                clicks: url.clicks,                  // Include click count
+                unique_clicks: unique_visitor_count, // Count of unique visitors
             });
         }
     }
@@ -262,6 +301,7 @@ pub async fn get_url_analytics(
     let code = path.into_inner();
     let db = &app_state.db;
     let urls_collection = db.collection::<ShortenedUrl>("urls");
+    let visitors_collection = db.collection::<UrlVisitor>("visitors");
 
     // Find the URL by short code
     let url_doc = urls_collection
@@ -271,6 +311,12 @@ pub async fn get_url_analytics(
 
     match url_doc {
         Some(url) => {
+            // Count unique visitors for this URL
+            let unique_visitor_count = visitors_collection
+                .count_documents(doc! {"short_code": &code})
+                .await
+                .unwrap_or(0) as usize;
+
             let analytics = UrlAnalyticsResponse {
                 short_code: url.short_code,
                 original_url: url.original_url,
@@ -279,7 +325,7 @@ pub async fn get_url_analytics(
                 clicks: url.clicks,
                 has_qr_code: url.qr_code_svg.is_some(),
                 qr_code_generated_at: url.qr_code_generated_at,
-                unique_clicks: url.unique_visitors.len(), // Count of unique visitors
+                unique_clicks: unique_visitor_count, // Count of unique visitors
             };
 
             Ok(HttpResponse::Ok().json(analytics))
