@@ -1,8 +1,12 @@
 # MakeMeShort API
 
+---
+
 MakeMeShort is a powerful URL shortening service with advanced features including QR code generation and comprehensive analytics.
 
 ## Table of Contents
+
+---
 
 - [Base URL](#base-url)
 - [Endpoints](#endpoints)
@@ -15,15 +19,23 @@ MakeMeShort is a powerful URL shortening service with advanced features includin
 
 ## Base URL
 
+---
+
 ```
 localhost:8080/api/
 ```
 
 ## Endpoints
 
+---
+
 ### URL Operations
 
+---
+
 #### Create Short URL
+
+---
 
 Creates a shortened URL for a given original URL.
 
@@ -53,6 +65,8 @@ Method: POST
 ```
 
 #### List All URLs
+
+---
 
 Lists all shortened URLs with optional search functionality.
 
@@ -85,6 +99,8 @@ Method: GET
 
 #### Redirect to Original URL
 
+---
+
 Redirects to the original URL and tracks the click.
 
 ```
@@ -100,7 +116,11 @@ Method: GET
 
 ### QR Code Operations
 
+---
+
 #### Regenerate QR Code
+
+---
 
 Regenerates a QR code for a URL.
 
@@ -122,6 +142,8 @@ Method: GET
 
 #### Get QR Code Info
 
+---
+
 Gets the QR code SVG directly.
 
 ```
@@ -141,6 +163,8 @@ Method: GET
 
 #### Generate QR Code Directly
 
+---
+
 Generates a QR code for any URL without requiring it to be shortened first.
 
 - **URL**: `/qr`
@@ -159,7 +183,11 @@ Generates a QR code for any URL without requiring it to be shortened first.
 
 ### Analytics
 
+---
+
 #### Get URL Analytics
+
+---
 
 Gets analytics for a specific URL.
 
@@ -191,7 +219,11 @@ Method: GET
 
 ### System Operations
 
+---
+
 #### Health Check
+
+---
 
 Checks if the API is running.
 
@@ -212,9 +244,11 @@ Method: GET
 
 ## Error Responses
 
-The API uses standard HTTP status codes to indicate the success or failure of a request.
+---
 
 ### Common Error Responses
+
+---
 
 - **400 Bad Request**: Invalid request parameters
 - **404 Not Found**: URL not found
@@ -235,7 +269,11 @@ Example error response:
 
 ## Data Models
 
+---
+
 ### ShortenedUrl
+
+---
 
 - `id`: ObjectId (MongoDB ID)
 - `original_url`: String (The original URL)
@@ -246,6 +284,8 @@ Example error response:
 
 ### QrCode
 
+---
+
 - `id`: ObjectId (MongoDB ID)
 - `short_code`: String (Reference to the shortened URL)
 - `original_url`: String (The original URL)
@@ -254,6 +294,8 @@ Example error response:
 - `target_type`: String ("original" or "shortened")
 
 ### UrlVisitor
+
+---
 
 - `id`: ObjectId (MongoDB ID)
 - `short_code`: String (Reference to the shortened URL)
