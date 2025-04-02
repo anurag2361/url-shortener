@@ -1,4 +1,5 @@
 use actix_web::{HttpResponse, Responder, Result, error, http, web};
+use futures_util::StreamExt;
 use mongodb::bson::doc;
 use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
@@ -16,11 +17,22 @@ pub struct UrlRequest {
 }
 
 #[derive(Serialize)]
+pub struct UrlListResponse {
+    pub id: Option<String>,
+    pub original_url: String,
+    pub short_code: String,
+    pub created_at: Option<i64>,
+    pub expires_at: Option<i64>,
+    pub has_qr_code: bool,
+    pub qr_code_generated_at: Option<i64>,
+}
+
+#[derive(Serialize)]
 pub struct UrlResponse {
     pub original_url: String,
     pub short_url: String,
     pub short_code: String,
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub expires_at: Option<i64>,
 }
 
 /// Create a shortened URL
@@ -109,5 +121,66 @@ pub async fn redirect_to_url(
                 .finish())
         }
         None => Ok(HttpResponse::NotFound().body("Short URL not found")),
+    }
+}
+
+pub async fn get_all_urls(app_state: web::Data<AppState>) -> Result<impl Responder> {
+    let db = &app_state.db;
+    let urls_collection = db.collection::<ShortenedUrl>("urls");
+
+    // Find all URLs
+    let mut cursor = urls_collection
+        .find(doc! {})
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+    let mut urls = Vec::new();
+    while let Some(result) = cursor.next().await {
+        if let Ok(url) = result {
+            // Convert ObjectId to string
+            let id_str = url.id.map(|oid| oid.to_hex());
+
+            // Create a simplified response without the SVG data
+            urls.push(UrlListResponse {
+                id: id_str,
+                original_url: url.original_url,
+                short_code: url.short_code,
+                created_at: url.created_at,
+                expires_at: url.expires_at,
+                has_qr_code: url.qr_code_svg.is_some(),
+                qr_code_generated_at: url.qr_code_generated_at,
+            });
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(urls))
+}
+
+/// Get QR code as SVG
+pub async fn get_qr_code_direct(
+    app_state: web::Data<AppState>,
+    path: web::Path<String>,
+) -> Result<impl Responder> {
+    let code = path.into_inner();
+    let db = &app_state.db;
+    let urls_collection = db.collection::<ShortenedUrl>("urls");
+
+    // Find the URL by short code
+    let url_doc = urls_collection
+        .find_one(doc! {"short_code": &code})
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+    match url_doc {
+        Some(url) => {
+            match url.qr_code_svg {
+                Some(svg) => {
+                    // Return the SVG directly with the correct content-type
+                    Ok(HttpResponse::Ok().content_type("image/svg+xml").body(svg))
+                }
+                None => Ok(HttpResponse::NotFound().body("QR code not generated for this URL")),
+            }
+        }
+        None => Ok(HttpResponse::NotFound().body("URL not found")),
     }
 }

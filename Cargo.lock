@@ -1694,6 +1694,7 @@ dependencies = [
  "chrono",
  "dotenv",
  "env_logger",
+ "futures-util",
  "image",
  "log",
  "mongodb",

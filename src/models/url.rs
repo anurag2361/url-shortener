@@ -8,15 +8,19 @@ pub struct ShortenedUrl {
     pub original_url: String,
     pub short_code: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub expires_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qr_code_svg: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qr_code_generated_at: Option<i64>,
 }
 
 impl ShortenedUrl {
     pub fn new(original_url: String, short_code: String, expires_in_days: Option<u32>) -> Self {
-        let now = chrono::Utc::now();
-        let expires_at = expires_in_days.map(|days| now + chrono::Duration::days(days as i64));
+        let now = chrono::Utc::now().timestamp_millis();
+        let expires_at = expires_in_days.map(|days| now + (days as i64 * 24 * 60 * 60 * 1000)); // Add days in milliseconds
 
         Self {
             id: None,
@@ -24,12 +28,14 @@ impl ShortenedUrl {
             short_code,
             created_at: Some(now),
             expires_at,
+            qr_code_svg: None,
+            qr_code_generated_at: None,
         }
     }
 
     pub fn is_expired(&self) -> bool {
         match self.expires_at {
-            Some(expiry) => chrono::Utc::now() > expiry,
+            Some(expiry) => chrono::Utc::now().timestamp_millis() > expiry,
             None => false, // No expiration date means it never expires
         }
     }
