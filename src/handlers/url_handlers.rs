@@ -35,6 +35,11 @@ pub struct UrlResponse {
     pub expires_at: Option<i64>,
 }
 
+#[derive(Deserialize)]
+pub struct UrlSearchParams {
+    pub search: Option<String>,
+}
+
 /// Create a shortened URL
 pub async fn create_short_url(
     app_state: web::Data<AppState>,
@@ -124,13 +129,30 @@ pub async fn redirect_to_url(
     }
 }
 
-pub async fn get_all_urls(app_state: web::Data<AppState>) -> Result<impl Responder> {
+pub async fn get_all_urls(
+    app_state: web::Data<AppState>,
+    query: web::Query<UrlSearchParams>,
+) -> Result<impl Responder> {
     let db = &app_state.db;
     let urls_collection = db.collection::<ShortenedUrl>("urls");
 
+    // Create filter based on search parameter
+    let filter = match &query.search {
+        Some(search_term) if !search_term.is_empty() => {
+            // Case-insensitive search in original_url field
+            doc! {
+                "original_url": {
+                    "$regex": search_term,
+                    "$options": "i"  // case-insensitive
+                }
+            }
+        }
+        _ => doc! {}, // Empty filter returns all documents
+    };
+
     // Find all URLs
     let mut cursor = urls_collection
-        .find(doc! {})
+        .find(filter)
         .await
         .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
 
