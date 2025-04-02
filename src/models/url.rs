@@ -11,10 +11,6 @@ pub struct ShortenedUrl {
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub qr_code_svg: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub qr_code_generated_at: Option<i64>,
     #[serde(default)]
     pub clicks: i64, // Number of clicks/redirects tracked
 }
@@ -30,8 +26,6 @@ impl ShortenedUrl {
             short_code,
             created_at: Some(now),
             expires_at,
-            qr_code_svg: None,
-            qr_code_generated_at: None,
             clicks: 0,
         }
     }

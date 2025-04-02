@@ -16,7 +16,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .route("/r/{code}", web::get().to(redirect_to_url))
             .route("/qr/{code}", web::get().to(generate_qr))
             .route("/qr/{code}/regenerate", web::get().to(regenerate_qr))
-            .route("/qr/{code}/info", web::get().to(get_qr_code_direct)) // New endpoint
-            .route("/analytics/{code}", web::get().to(get_url_analytics)), // New analytics endpoint
+            .route("/qr/{code}/info", web::get().to(get_qr_code_direct))
+            .route("/analytics/{code}", web::get().to(get_url_analytics)),
     );
 }

@@ -1,21 +1,35 @@
 use actix_web::{HttpResponse, Responder, Result, error, web};
 use mongodb::bson::doc;
 use mongodb::options::{FindOneAndUpdateOptions, ReturnDocument};
-use qrcode::QrCode;
+use qrcode::QrCode as QrCodeGenerator;
 use qrcode::render::svg;
 use serde::Deserialize;
 
+use crate::models::qr_code::{QrCode as QrCodeModel, TargetType};
 use crate::models::url::ShortenedUrl;
 use crate::state::app_state::AppState;
+
+#[derive(Deserialize)]
+pub struct QrRequest {
+    pub url_type: Option<String>, // "original" or "shortened" (default)
+}
 
 /// Generate QR code for a shortened URL
 pub async fn generate_qr(
     app_state: web::Data<AppState>,
     path: web::Path<String>,
+    query: web::Query<QrRequest>,
 ) -> Result<impl Responder> {
     let code = path.into_inner();
     let db = &app_state.db;
     let urls_collection = db.collection::<ShortenedUrl>("urls");
+    let qr_codes_collection = db.collection::<QrCodeModel>("qr_codes");
+
+    // Determine target type from query parameter
+    let target_type = match query.url_type.as_deref() {
+        Some("original") => TargetType::Original,
+        _ => TargetType::Shortened,
+    };
 
     // Find the URL by short code
     let url_doc = urls_collection
@@ -32,20 +46,36 @@ pub async fn generate_qr(
                 })));
             }
 
-            // Check if QR code already exists and use it
-            if let Some(existing_svg) = url.qr_code_svg {
+            // Check if QR code already exists for this URL and target type
+            let existing_qr = qr_codes_collection
+                .find_one(doc! {
+                    "short_code": &code,
+                    "target_type": match target_type {
+                        TargetType::Original => "original",
+                        TargetType::Shortened => "shortened",
+                    }
+                })
+                .await
+                .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+            if let Some(qr) = existing_qr {
                 return Ok(HttpResponse::Ok()
                     .content_type("image/svg+xml")
-                    .body(existing_svg));
+                    .body(qr.svg_content));
             }
 
-            // Construct the short URL
-            let host =
-                std::env::var("HOST").unwrap_or_else(|_| String::from("http://localhost:8080"));
-            let short_url = format!("{}/r/{}", host, code);
+            // Generate QR code
+            let target_url = match target_type {
+                TargetType::Original => url.original_url.clone(),
+                TargetType::Shortened => {
+                    let host = std::env::var("HOST")
+                        .unwrap_or_else(|_| String::from("http://localhost:8080"));
+                    format!("{}/r/{}", host, code)
+                }
+            };
 
             // Generate QR code
-            let qr_code = QrCode::new(short_url.as_bytes()).map_err(|e| {
+            let qr_code = QrCodeGenerator::new(target_url.as_bytes()).map_err(|e| {
                 error::ErrorInternalServerError(format!("QR code generation error: {}", e))
             })?;
 
@@ -56,36 +86,17 @@ pub async fn generate_qr(
                 .quiet_zone(true)
                 .build();
 
-            // Save the SVG to the database
-            let find_options = FindOneAndUpdateOptions::builder()
-                .return_document(ReturnDocument::After)
-                .build();
+            // Save the QR code to the database
+            let new_qr = QrCodeModel::new(
+                code.clone(),
+                url.original_url.clone(),
+                svg_output.clone(),
+                target_type,
+            );
 
-            urls_collection
-                .find_one_and_update(
-                    doc! {"short_code": &code},
-                    doc! {
-                        "$set": {
-                            "qr_code_svg": &svg_output,
-                            "qr_code_generated_at": chrono::Utc::now().timestamp_millis(), // Store timestamp in milliseconds
-                        }
-                    },
-                )
-                .with_options(find_options)
-                .await
-                .map_err(|e| {
-                    let error_message = e.to_string();
-                    if error_message.contains(
-                        "invalid type: map, expected an RFC 3339 formatted date and time string",
-                    ) {
-                        log::error!("Failed to update QR code due to invalid date format: {}", e); // Log the specific error
-                        error::ErrorInternalServerError(
-                            "An unexpected error occurred while updating the QR code.",
-                        ) // Return a generic error message
-                    } else {
-                        error::ErrorInternalServerError(format!("Failed to update QR code: {}", e)) // Return other errors as they are
-                    }
-                })?;
+            qr_codes_collection.insert_one(&new_qr).await.map_err(|e| {
+                error::ErrorInternalServerError(format!("Failed to save QR code: {}", e))
+            })?;
 
             Ok(HttpResponse::Ok()
                 .content_type("image/svg+xml")
@@ -99,6 +110,7 @@ pub async fn generate_qr(
 #[derive(Deserialize)]
 pub struct RegenerateQrParams {
     pub force: Option<bool>,
+    pub url_type: Option<String>, // "original" or "shortened" (default)
 }
 
 pub async fn regenerate_qr(
@@ -109,26 +121,21 @@ pub async fn regenerate_qr(
     let code = path.into_inner();
     let force = query.force.unwrap_or(false);
 
+    // Determine target type from query parameter
+    let target_type = match query.url_type.as_deref() {
+        Some("original") => TargetType::Original,
+        _ => TargetType::Shortened,
+    };
+
     let db = &app_state.db;
     let urls_collection = db.collection::<ShortenedUrl>("urls");
+    let qr_codes_collection = db.collection::<QrCodeModel>("qr_codes");
 
     // Find the URL by short code
     let url_doc = urls_collection
         .find_one(doc! {"short_code": &code})
         .await
-        .map_err(|e| {
-            let error_message = e.to_string();
-            if error_message
-                .contains("invalid type: map, expected an RFC 3339 formatted date and time string")
-            {
-                log::error!("Failed to update QR code due to invalid date format: {}", e); // Log the specific error
-                error::ErrorInternalServerError(
-                    "An unexpected error occurred while updating the QR code.",
-                ) // Return a generic error message
-            } else {
-                error::ErrorInternalServerError(format!("Failed to update QR code: {}", e)) // Return other errors as they are
-            }
-        })?;
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
 
     match url_doc {
         Some(url) => {
@@ -139,19 +146,39 @@ pub async fn regenerate_qr(
                 })));
             }
 
-            // If not forcing regeneration and QR exists, return the existing one
-            if !force && url.qr_code_svg.is_some() {
-                return Ok(HttpResponse::Ok()
-                    .content_type("image/svg+xml")
-                    .body(url.qr_code_svg.unwrap()));
+            // Check if QR code already exists and if force=false, return existing QR
+            if !force {
+                let existing_qr = qr_codes_collection
+                    .find_one(doc! {
+                        "short_code": &code,
+                        "target_type": match target_type {
+                            TargetType::Original => "original",
+                            TargetType::Shortened => "shortened",
+                        }
+                    })
+                    .await
+                    .map_err(|e| {
+                        error::ErrorInternalServerError(format!("Database error: {}", e))
+                    })?;
+
+                if let Some(qr) = existing_qr {
+                    return Ok(HttpResponse::Ok()
+                        .content_type("image/svg+xml")
+                        .body(qr.svg_content));
+                }
             }
 
-            // Generate a new QR code
-            let host =
-                std::env::var("HOST").unwrap_or_else(|_| String::from("http://localhost:8080"));
-            let short_url = format!("{}/r/{}", host, code);
+            // Generate QR code
+            let target_url = match target_type {
+                TargetType::Original => url.original_url.clone(),
+                TargetType::Shortened => {
+                    let host = std::env::var("HOST")
+                        .unwrap_or_else(|_| String::from("http://localhost:8080"));
+                    format!("{}/r/{}", host, code)
+                }
+            };
 
-            let qr_code = QrCode::new(short_url.as_bytes()).map_err(|e| {
+            let qr_code = QrCodeGenerator::new(target_url.as_bytes()).map_err(|e| {
                 error::ErrorInternalServerError(format!("QR code generation error: {}", e))
             })?;
 
@@ -166,30 +193,27 @@ pub async fn regenerate_qr(
                 .return_document(ReturnDocument::After)
                 .build();
 
-            urls_collection
+            // Update or insert QR code
+            qr_codes_collection
                 .find_one_and_update(
-                    doc! {"short_code": &code},
+                    doc! {
+                        "short_code": &code,
+                        "target_type": match target_type {
+                            TargetType::Original => "original",
+                            TargetType::Shortened => "shortened",
+                        }
+                    },
                     doc! {
                         "$set": {
-                            "qr_code_svg": &svg_output,
-                            "qr_code_generated_at": chrono::Utc::now().timestamp_millis(), // Store timestamp in milliseconds
+                            "svg_content": &svg_output,
+                            "generated_at": chrono::Utc::now().timestamp_millis(),
                         }
                     },
                 )
                 .with_options(find_options)
                 .await
                 .map_err(|e| {
-                    let error_message = e.to_string();
-                    if error_message.contains(
-                        "invalid type: map, expected an RFC 3339 formatted date and time string",
-                    ) {
-                        log::error!("Failed to update QR code due to invalid date format: {}", e); // Log the specific error
-                        error::ErrorInternalServerError(
-                            "An unexpected error occurred while updating the QR code.",
-                        ) // Return a generic error message
-                    } else {
-                        error::ErrorInternalServerError(format!("Failed to update QR code: {}", e)) // Return other errors as they are
-                    }
+                    error::ErrorInternalServerError(format!("Failed to update QR code: {}", e))
                 })?;
 
             Ok(HttpResponse::Ok()

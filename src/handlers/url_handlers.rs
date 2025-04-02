@@ -5,6 +5,7 @@ use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+use crate::models::qr_code::{QrCode, TargetType};
 use crate::models::url::ShortenedUrl;
 use crate::models::url_visitor::UrlVisitor;
 use crate::state::app_state::AppState;
@@ -25,10 +26,15 @@ pub struct UrlListResponse {
     pub short_code: String,
     pub created_at: Option<i64>,
     pub expires_at: Option<i64>,
-    pub has_qr_code: bool,
-    pub qr_code_generated_at: Option<i64>,
-    pub clicks: i64,          // Add click count to the response
-    pub unique_clicks: usize, // Count of unique visitors
+    pub has_shortened_qr: bool,
+    pub has_original_qr: bool,
+    pub clicks: i64,
+    pub unique_clicks: usize,
+}
+
+#[derive(Deserialize)]
+pub struct QrRequest {
+    pub url_type: Option<String>, // "original" or "shortened" (default)
 }
 
 #[derive(Serialize)]
@@ -51,9 +57,11 @@ pub struct UrlAnalyticsResponse {
     pub created_at: Option<i64>,
     pub expires_at: Option<i64>,
     pub clicks: i64,
-    pub has_qr_code: bool,
-    pub qr_code_generated_at: Option<i64>,
     pub unique_clicks: usize,
+    pub has_shortened_qr: bool,
+    pub has_original_qr: bool,
+    pub shortened_qr_generated_at: Option<i64>,
+    pub original_qr_generated_at: Option<i64>,
 }
 
 /// Create a shortened URL
@@ -210,11 +218,11 @@ pub async fn get_all_urls(
     let db = &app_state.db;
     let urls_collection = db.collection::<ShortenedUrl>("urls");
     let visitors_collection = db.collection::<UrlVisitor>("visitors");
+    let qr_codes_collection = db.collection::<QrCode>("qr_codes");
 
     // Create filter based on search parameter
     let filter = match &query.search {
         Some(search_term) if !search_term.is_empty() => {
-            // Case-insensitive search in original_url field
             doc! {
                 "original_url": {
                     "$regex": search_term,
@@ -225,7 +233,7 @@ pub async fn get_all_urls(
         _ => doc! {}, // Empty filter returns all documents
     };
 
-    // Find all URLs
+    // Find URLs with the filter
     let mut cursor = urls_collection
         .find(filter)
         .await
@@ -246,17 +254,35 @@ pub async fn get_all_urls(
                 .await
                 .unwrap_or(0) as usize;
 
-            // Create a simplified response without the SVG data
+            // Check if QR codes exist for this URL
+            let has_shortened_qr = qr_codes_collection
+                .count_documents(doc! {
+                    "short_code": &short_code,
+                    "target_type": "shortened"
+                })
+                .await
+                .unwrap_or(0)
+                > 0;
+
+            let has_original_qr = qr_codes_collection
+                .count_documents(doc! {
+                    "short_code": &short_code,
+                    "target_type": "original"
+                })
+                .await
+                .unwrap_or(0)
+                > 0;
+
             urls.push(UrlListResponse {
                 id: id_str,
                 original_url: url.original_url,
-                short_code: url.short_code,
+                short_code,
                 created_at: url.created_at,
                 expires_at: url.expires_at,
-                has_qr_code: url.qr_code_svg.is_some(),
-                qr_code_generated_at: url.qr_code_generated_at,
-                clicks: url.clicks,                  // Include click count
-                unique_clicks: unique_visitor_count, // Count of unique visitors
+                has_shortened_qr,
+                has_original_qr,
+                clicks: url.clicks,
+                unique_clicks: unique_visitor_count,
             });
         }
     }
@@ -265,31 +291,43 @@ pub async fn get_all_urls(
 }
 
 /// Get QR code as SVG
+/// Get QR code as SVG
 pub async fn get_qr_code_direct(
     app_state: web::Data<AppState>,
     path: web::Path<String>,
+    query: web::Query<QrRequest>,
 ) -> Result<impl Responder> {
     let code = path.into_inner();
     let db = &app_state.db;
-    let urls_collection = db.collection::<ShortenedUrl>("urls");
 
-    // Find the URL by short code
-    let url_doc = urls_collection
-        .find_one(doc! {"short_code": &code})
+    // Determine target type from query parameter
+    let target_type = match query.url_type.as_deref() {
+        Some("original") => TargetType::Original,
+        _ => TargetType::Shortened,
+    };
+
+    let qr_codes_collection = db.collection::<QrCode>("qr_codes");
+
+    // Find the QR code by short code and target type
+    let qr_doc = qr_codes_collection
+        .find_one(doc! {
+            "short_code": &code,
+            "target_type": match target_type {
+                TargetType::Original => "original",
+                TargetType::Shortened => "shortened",
+            }
+        })
         .await
         .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
 
-    match url_doc {
-        Some(url) => {
-            match url.qr_code_svg {
-                Some(svg) => {
-                    // Return the SVG directly with the correct content-type
-                    Ok(HttpResponse::Ok().content_type("image/svg+xml").body(svg))
-                }
-                None => Ok(HttpResponse::NotFound().body("QR code not generated for this URL")),
-            }
+    match qr_doc {
+        Some(qr) => {
+            // Return the SVG directly with the correct content-type
+            Ok(HttpResponse::Ok()
+                .content_type("image/svg+xml")
+                .body(qr.svg_content))
         }
-        None => Ok(HttpResponse::NotFound().body("URL not found")),
+        None => Ok(HttpResponse::NotFound().body("QR code not found for this URL")),
     }
 }
 
@@ -302,6 +340,7 @@ pub async fn get_url_analytics(
     let db = &app_state.db;
     let urls_collection = db.collection::<ShortenedUrl>("urls");
     let visitors_collection = db.collection::<UrlVisitor>("visitors");
+    let qr_codes_collection = db.collection::<QrCode>("qr_codes");
 
     // Find the URL by short code
     let url_doc = urls_collection
@@ -317,15 +356,42 @@ pub async fn get_url_analytics(
                 .await
                 .unwrap_or(0) as usize;
 
+            // Check if QR codes exist for this URL
+            let shortened_qr = qr_codes_collection
+                .find_one(doc! {
+                    "short_code": &code,
+                    "target_type": "shortened"
+                })
+                .await
+                .ok()
+                .flatten();
+
+            let original_qr = qr_codes_collection
+                .find_one(doc! {
+                    "short_code": &code,
+                    "target_type": "original"
+                })
+                .await
+                .ok()
+                .flatten();
+
+            let has_shortened_qr = shortened_qr.is_some();
+            let has_original_qr = original_qr.is_some();
+
+            let shortened_qr_generated_at = shortened_qr.map(|qr| qr.generated_at);
+            let original_qr_generated_at = original_qr.map(|qr| qr.generated_at);
+
             let analytics = UrlAnalyticsResponse {
                 short_code: url.short_code,
                 original_url: url.original_url,
                 created_at: url.created_at,
                 expires_at: url.expires_at,
                 clicks: url.clicks,
-                has_qr_code: url.qr_code_svg.is_some(),
-                qr_code_generated_at: url.qr_code_generated_at,
-                unique_clicks: unique_visitor_count, // Count of unique visitors
+                unique_clicks: unique_visitor_count,
+                has_shortened_qr,
+                has_original_qr,
+                shortened_qr_generated_at,
+                original_qr_generated_at,
             };
 
             Ok(HttpResponse::Ok().json(analytics))
