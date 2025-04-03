@@ -9,7 +9,10 @@ MakeMeShort is a powerful URL shortening service with advanced features includin
 ---
 
 - [Base URL](#base-url)
+- [Authentication Requirements](#authentication-requirements)
 - [Endpoints](#endpoints)
+  - [Authentication](#authentication)
+  - [Role-Based Access Control](#role-based-access-control)
   - [URL Operations](#url-operations)
   - [QR Code Operations](#qr-code-operations)
   - [Analytics](#analytics)
@@ -25,9 +28,61 @@ MakeMeShort is a powerful URL shortening service with advanced features includin
 localhost:8080/api/
 ```
 
+## Authentication Requirements
+
+---
+
+All API endpoints except `/auth/*` and `/health/check` require authentication using a JWT token in the Authorization header:
+
+```
+Authorization: Bearer <your_jwt_token>
+```
+
+Example:
+
+```bash
+curl --location --request GET 'localhost:8080/api/urls' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
+```
+
 ## Endpoints
 
 ---
+
+### Authentication
+
+---
+
+#### Login
+
+---
+
+Authenticate and receive a JWT token.
+
+```
+URL: /api/auth/login
+Method: POST
+```
+
+**Request Body:**
+
+```json
+{
+  "username": "your_username",
+  "password": "your_password"
+}
+```
+
+**Response:**
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "username": "your_username",
+  "roles": ["URL Creator", "Analytics Viewer"]
+}
+```
 
 ### URL Operations
 
@@ -42,6 +97,9 @@ Creates a shortened URL for a given original URL.
 ```
 URL: /shorten
 Method: POST
+Headers:
+  - Content-Type: application/json
+  - Authorization: Bearer <token>
 ```
 
 **Request Body:**
@@ -73,6 +131,8 @@ Lists all shortened URLs with optional search functionality.
 ```
 URL: /urls
 Method: GET
+Headers:
+  - Authorization: Bearer <token>
 ```
 
 **Query Parameters:**
@@ -106,6 +166,8 @@ Redirects to the original URL and tracks the click.
 ```
 URL: /r/{code}
 Method: GET
+Headers:
+  - Authorization: Bearer <token>
 ```
 
 **Path Parameters:**
@@ -127,6 +189,8 @@ Regenerates a QR code for a URL.
 ```
 URL: /qr/{code}/regenerate
 Method: GET
+Headers:
+  - Authorization: Bearer <token>
 ```
 
 **Path Parameters:**
@@ -149,6 +213,8 @@ Gets the QR code SVG directly.
 ```
 URL: /qr/{code}/info
 Method: GET
+Headers:
+  - Authorization: Bearer <token>
 ```
 
 **Path Parameters:**
@@ -167,9 +233,15 @@ Method: GET
 
 Generates a QR code for any URL without requiring it to be shortened first.
 
-- **URL**: `/qr`
-- **Method**: `POST`
-- **Request Body**:
+```
+URL: /qr
+Method: POST
+Headers:
+  - Content-Type: application/json
+  - Authorization: Bearer <token>
+```
+
+**Request Body:**
 
 ```json
 {
@@ -194,6 +266,8 @@ Gets analytics for a specific URL.
 ```
 URL: /analytics/{code}
 Method: GET
+Headers:
+  - Authorization: Bearer <token>
 ```
 
 **Path Parameters:**
