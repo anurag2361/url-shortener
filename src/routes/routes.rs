@@ -8,12 +8,13 @@ use crate::handlers::url_handlers::{
 
 /// Configure the routes
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
+    // Define redirect route at the root level
+    cfg.route("/r/{code}", web::get().to(redirect_to_url));
     cfg.service(
         web::scope("/api")
             .route("/shorten", web::post().to(create_short_url))
             .route("/urls", web::get().to(get_all_urls))
             .route("/health/check", web::get().to(health_check))
-            .route("/r/{code}", web::get().to(redirect_to_url))
             .route("/qr/{code}/regenerate", web::get().to(regenerate_qr))
             .route("/qr/{code}/info", web::get().to(get_qr_code_direct))
             .route("/analytics/{code}", web::get().to(get_url_analytics))
