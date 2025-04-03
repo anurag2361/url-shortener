@@ -10,6 +10,8 @@ MakeMeShort is a powerful URL shortening service with advanced features includin
 
 - [Base URL](#base-url)
 - [Endpoints](#endpoints)
+  - [Authentication](#authentication)
+    - [Roles & Permissions](#roles--permissions)
   - [URL Operations](#url-operations)
   - [QR Code Operations](#qr-code-operations)
   - [Analytics](#analytics)
@@ -28,6 +30,231 @@ localhost:8080/api/
 ## Endpoints
 
 ---
+
+### Authentication
+
+---
+
+#### Register
+
+---
+
+Register a new user account.
+
+```
+URL: /auth/register
+Method: POST
+```
+
+**Request Body:**
+
+```json
+{
+  "username": "your_username",
+  "email": "your_email@example.com",
+  "password": "your_password"
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "user_id",
+  "username": "your_username",
+  "email": "your_email@example.com",
+  "created_at": 1649289600000
+}
+```
+
+#### Login
+
+---
+
+Authenticate and receive a JWT token.
+
+```
+URL: /auth/login
+Method: POST
+```
+
+**Request Body:**
+
+```json
+{
+  "username": "your_username",
+  "password": "your_password"
+}
+```
+
+**Response:**
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "user_id",
+    "username": "your_username",
+    "email": "your_email@example.com",
+    "roles": ["user"]
+  }
+}
+```
+
+#### Refresh Token
+
+---
+
+Get a new access token using refresh token.
+
+```
+URL: /auth/refresh
+Method: POST
+Headers: Authorization: Bearer <refresh_token>
+```
+
+**Response:**
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+#### Logout
+
+---
+
+Invalidate the current session token.
+
+```
+URL: /auth/logout
+Method: POST
+Headers: Authorization: Bearer <token>
+```
+
+**Response:**
+
+```json
+{
+  "message": "Successfully logged out"
+}
+```
+
+#### Password Reset Request
+
+---
+
+Request a password reset link.
+
+```
+URL: /auth/password/reset-request
+Method: POST
+```
+
+**Request Body:**
+
+```json
+{
+  "email": "your_email@example.com"
+}
+```
+
+**Response:**
+
+```json
+{
+  "message": "Password reset link sent to email"
+}
+```
+
+### Roles & Permissions
+
+---
+
+The API uses role-based access control (RBAC) with the following roles:
+
+#### Available Roles
+
+---
+
+1. **Admin**
+
+   - Can manage all users and their roles
+   - Full access to all API endpoints
+   - Can view system metrics and logs
+
+2. **URL Manager**
+
+   - Can create and manage shortened URLs
+   - Can generate and manage QR codes
+   - Can view analytics for owned URLs
+
+3. **Analytics Viewer**
+
+   - Can view analytics for all URLs
+   - Read-only access to URL information
+
+4. **Basic User**
+   - Can create shortened URLs
+   - Can view own URLs and their analytics
+   - Can generate QR codes for own URLs
+
+#### Role Management
+
+---
+
+Manage user roles (Admin only).
+
+```
+URL: /auth/roles
+Method: PUT
+Headers: Authorization: Bearer <token>
+```
+
+**Request Body:**
+
+```json
+{
+  "username": "target_username",
+  "roles": ["URL Manager", "Analytics Viewer"]
+}
+```
+
+**Response:**
+
+```json
+{
+  "username": "target_username",
+  "roles": ["URL Manager", "Analytics Viewer"],
+  "updated_at": 1649289600000
+}
+```
+
+#### Get User Permissions
+
+---
+
+Retrieve current user's permissions.
+
+```
+URL: /auth/permissions
+Method: GET
+Headers: Authorization: Bearer <token>
+```
+
+**Response:**
+
+```json
+{
+  "roles": ["URL Manager"],
+  "permissions": {
+    "urls": ["create", "read", "update", "delete"],
+    "qr": ["create", "read"],
+    "analytics": ["read_own"]
+  }
+}
+```
 
 ### URL Operations
 
@@ -303,3 +530,15 @@ Example error response:
 - `timestamp`: i64 (Timestamp in milliseconds)
 - `user_agent`: Optional<String> (User agent of the visitor)
 - `referrer`: Optional<String> (Referrer of the visitor)
+
+### User
+
+---
+
+- `id`: ObjectId (MongoDB ID)
+- `username`: String
+- `email`: String
+- `password_hash`: String
+- `roles`: Array<String>
+- `created_at`: i64 (Timestamp in milliseconds)
+- `last_login`: Optional<i64> (Timestamp in milliseconds)
