@@ -9,6 +9,8 @@ use crate::models::qr_code::{QrCode as QrCodeModel, TargetType};
 use crate::models::url::ShortenedUrl;
 use crate::state::app_state::AppState;
 use crate::structs::qr_request::{CreateQrRequest, RegenerateQrParams};
+use futures_util::TryStreamExt;
+use serde::{Deserialize, Serialize};
 
 pub async fn regenerate_qr(
     app_state: web::Data<AppState>,
@@ -217,4 +219,91 @@ pub async fn generate_direct_qr(
     Ok(HttpResponse::Ok()
         .content_type("image/svg+xml")
         .body(svg_output))
+}
+
+// New struct for QR code response
+#[derive(Serialize)]
+pub struct QrCodeResponse {
+    pub id: String,
+    pub short_code: String,
+    pub original_url: String,
+    pub generated_at: i64,
+    pub target_type: String,
+    pub is_direct: bool,
+    pub svg_content: String,
+}
+
+// New struct for QR code search parameters
+#[derive(Deserialize)]
+pub struct QrSearchParams {
+    pub search: Option<String>,
+    pub target_type: Option<String>,
+    pub direct_only: Option<bool>,
+}
+
+/// Get all QR codes
+pub async fn get_all_qr_codes(
+    app_state: web::Data<AppState>,
+    query: web::Query<QrSearchParams>,
+) -> Result<impl Responder> {
+    let db = &app_state.db;
+    let qr_codes_collection = db.collection::<QrCodeModel>("qr_codes");
+
+    // Build filter based on search parameters
+    let mut filter = doc! {};
+
+    // Filter by search term if provided
+    if let Some(search) = &query.search {
+        if !search.is_empty() {
+            filter = doc! {
+                "$or": [
+                    { "short_code": { "$regex": search, "$options": "i" } },
+                    { "original_url": { "$regex": search, "$options": "i" } }
+                ]
+            };
+        }
+    }
+
+    // Filter by target type if provided
+    if let Some(target_type) = &query.target_type {
+        if target_type == "original" || target_type == "shortened" {
+            filter.insert("target_type", target_type);
+        }
+    }
+
+    // Filter direct QR codes if requested
+    if query.direct_only.unwrap_or(false) {
+        filter.insert("short_code", doc! { "$regex": "^direct-" });
+    }
+
+    // Find QR codes
+    let cursor = qr_codes_collection
+        .find(filter)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+    // Process results
+    let qr_codes = cursor
+        .try_collect::<Vec<QrCodeModel>>()
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+    // Transform to response objects
+    let qr_responses: Vec<QrCodeResponse> = qr_codes
+        .into_iter()
+        .map(|qr| QrCodeResponse {
+            id: qr.id.map_or_else(|| "".to_string(), |id| id.to_hex()),
+            short_code: qr.short_code.clone(),
+            original_url: qr.original_url,
+            generated_at: qr.generated_at,
+            svg_content: qr.svg_content,
+            target_type: match qr.target_type {
+                TargetType::Original => "original".to_string(),
+                TargetType::Shortened => "shortened".to_string(),
+            },
+            is_direct: qr.short_code.starts_with("direct-"),
+        })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(qr_responses))
 }
