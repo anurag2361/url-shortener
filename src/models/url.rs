@@ -13,10 +13,16 @@ pub struct ShortenedUrl {
     pub expires_at: Option<i64>,
     #[serde(default)]
     pub clicks: i64, // Number of clicks/redirects tracked
+    pub user_id: Option<String>,
 }
 
 impl ShortenedUrl {
-    pub fn new(original_url: String, short_code: String, expires_in_days: Option<u32>) -> Self {
+    pub fn new(
+        original_url: String,
+        short_code: String,
+        expires_in_days: Option<u32>,
+        user_id: Option<String>,
+    ) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
         let expires_at = expires_in_days.map(|days| now + (days as i64 * 24 * 60 * 60 * 1000)); // Add days in milliseconds
 
@@ -27,6 +33,7 @@ impl ShortenedUrl {
             created_at: Some(now),
             expires_at,
             clicks: 0,
+            user_id,
         }
     }
 

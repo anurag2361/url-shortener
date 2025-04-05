@@ -30,6 +30,8 @@ pub struct QrCodeResponse {
     pub generated_at: i64,
     pub target_type: String,
     pub is_direct: bool,
+    pub owned_by_current_user: bool,
+    pub user_id: Option<String>,
     pub svg_content: String,
 }
 
@@ -39,4 +41,5 @@ pub struct QrSearchParams {
     pub search: Option<String>,
     pub target_type: Option<String>,
     pub direct_only: Option<bool>,
+    pub owned_only: Option<bool>,
 }

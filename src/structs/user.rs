@@ -43,3 +43,12 @@ impl From<User> for UserResponse {
         }
     }
 }
+
+// Add a new SignupRequest struct
+#[derive(Deserialize)]
+pub struct SignupRequest {
+    pub username: String,
+    pub email: Option<String>,
+    pub full_name: Option<String>,
+    pub password: String,
+}

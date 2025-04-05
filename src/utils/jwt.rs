@@ -5,12 +5,13 @@ use std::env;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String, // Subject (username)
-    pub exp: usize,  // Expiration time
-    pub iat: usize,  // Issued at
+    pub sub: String,     // Subject (username)
+    pub exp: usize,      // Expiration time
+    pub iat: usize,      // Issued at
+    pub user_id: String, // Optional user ID
 }
 
-pub fn create_token(username: &str) -> Result<String> {
+pub fn create_token(username: &str, user_id: &str) -> Result<String> {
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::days(10))
         .context("Invalid timestamp")?
@@ -22,6 +23,7 @@ pub fn create_token(username: &str) -> Result<String> {
         sub: username.to_owned(),
         exp: expiration,
         iat: issued_at,
+        user_id: user_id.to_owned(),
     };
 
     let secret = env::var("JWT_SECRET").context("JWT_SECRET must be set")?;

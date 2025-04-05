@@ -1,6 +1,7 @@
 use crate::models::user::User;
 use crate::state::app_state::AppState;
 use crate::structs::user::{CreateUserRequest, EditUserRequest, UserResponse};
+use crate::utils::jwt::Claims;
 use actix_web::HttpMessage;
 use actix_web::{HttpResponse, Result, error, web};
 use bcrypt::{DEFAULT_COST, hash};
@@ -14,24 +15,15 @@ pub async fn get_all_users(
     let db = &app_state.db;
     let users_collection = db.collection::<User>("users");
 
-    // Get current user username from the request extensions
-    // The middleware puts the username directly in the extensions
-    let current_username = req
-        .extensions()
-        .get::<String>()
-        .ok_or_else(|| error::ErrorInternalServerError("User not found in request"))?
-        .clone();
+    // Get current user claims from the request extensions
+    let extensions = req.extensions();
+    let claims = extensions
+        .get::<Claims>()
+        .ok_or_else(|| error::ErrorInternalServerError("User claims not found in request"))?;
 
-    // Find the current user to get their ID
-    let current_user = users_collection
-        .find_one(doc! { "username": &current_username })
-        .await
-        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?
-        .ok_or_else(|| error::ErrorInternalServerError("Current user not found"))?;
-
-    let current_user_id = current_user
-        .id
-        .ok_or_else(|| error::ErrorInternalServerError("Current user ID not found"))?;
+    // Get current user ID directly from claims
+    let current_user_id = ObjectId::parse_str(&claims.user_id)
+        .map_err(|_| error::ErrorInternalServerError("Invalid user ID in token"))?;
 
     // Find all users except the current user (SuperUser)
     let filter = doc! { "_id": { "$ne": current_user_id } };
@@ -124,7 +116,7 @@ pub async fn edit_user(
     let users_collection = db.collection::<User>("users");
 
     // Check if user exists
-    let user = users_collection
+    let _user = users_collection
         .find_one(doc! { "_id": object_id.clone() })
         .await
         .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?

@@ -1,6 +1,6 @@
 use actix_web::web;
 
-use crate::handlers::auth_handlers::{create_superuser, login};
+use crate::handlers::auth_handlers::{create_superuser, login, signup};
 use crate::handlers::health_handlers::health_check;
 use crate::handlers::qr_handlers::{generate_direct_qr, get_all_qr_codes, regenerate_qr};
 use crate::handlers::url_handlers::{
@@ -19,7 +19,8 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/api/auth")
             .route("/login", web::post().to(login))
-            .route("/init", web::post().to(create_superuser)),
+            .route("/init", web::post().to(create_superuser))
+            .route("/signup", web::post().to(signup)),
     );
     // API routes - require authentication
     cfg.service(

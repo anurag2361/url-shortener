@@ -8,7 +8,7 @@ use actix_web::{
 };
 use futures_util::future::LocalBoxFuture;
 
-use crate::utils::jwt::validate_token;
+use crate::utils::jwt::{Claims, validate_token};
 
 pub struct JwtAuth;
 
@@ -90,8 +90,8 @@ where
             }
         };
 
-        // Store username in request extensions for later use
-        req.extensions_mut().insert(claims.sub.clone());
+        // Store the complete Claims object in request extensions for later use
+        req.extensions_mut().insert(claims);
 
         Box::pin(self.service.call(req))
     }

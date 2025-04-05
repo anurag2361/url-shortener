@@ -1,4 +1,4 @@
-use actix_web::{HttpResponse, Responder, Result, error, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, Responder, Result, error, web};
 use mongodb::bson::doc;
 use mongodb::options::{FindOneAndUpdateOptions, ReturnDocument};
 use qrcode::QrCode as QrCodeGenerator;
@@ -10,6 +10,7 @@ use crate::models::url::ShortenedUrl;
 use crate::state::app_state::AppState;
 use crate::structs::qr_request::{CreateQrRequest, RegenerateQrParams};
 use crate::structs::qr_request::{QrCodeResponse, QrSearchParams};
+use crate::utils::jwt::Claims;
 use futures_util::TryStreamExt;
 
 pub async fn regenerate_qr(
@@ -126,12 +127,19 @@ pub async fn regenerate_qr(
 /// Generate QR code directly from a URL without requiring a short code
 pub async fn generate_direct_qr(
     app_state: web::Data<AppState>,
-    web::Json(req): web::Json<CreateQrRequest>,
+    req: HttpRequest,
+    web::Json(req_body): web::Json<CreateQrRequest>,
 ) -> Result<impl Responder> {
     // Validate the URL
-    if let Err(errors) = req.validate() {
+    if let Err(errors) = req_body.validate() {
         return Ok(HttpResponse::BadRequest().json(errors));
     }
+
+    // Get user ID from request extensions
+    let user_id = req
+        .extensions()
+        .get::<Claims>()
+        .map(|claims| claims.user_id.clone());
 
     let db = &app_state.db;
     let qr_codes_collection = db.collection::<QrCodeModel>("qr_codes");
@@ -139,7 +147,7 @@ pub async fn generate_direct_qr(
     // First check if we already have a QR code for this URL
     let existing_qr = qr_codes_collection
         .find_one(doc! {
-            "original_url": &req.url,
+            "original_url": &req_body.url,
             "short_code": { "$regex": "^direct-" }, // Find direct QR codes
             "target_type": "original"
         })
@@ -149,7 +157,7 @@ pub async fn generate_direct_qr(
     // Check if QR exists and handle regeneration
     let has_existing_qr = existing_qr.is_some();
     if has_existing_qr {
-        if !req.force_regenerate.unwrap_or(false) {
+        if !req_body.force_regenerate.unwrap_or(false) {
             return Ok(HttpResponse::Ok()
                 .content_type("image/svg+xml")
                 .body(existing_qr.unwrap().svg_content));
@@ -157,10 +165,10 @@ pub async fn generate_direct_qr(
     }
 
     // Set dimensions (default or from request)
-    let dimensions = req.size.unwrap_or(200);
+    let dimensions = req_body.size.unwrap_or(200);
 
     // Generate QR code
-    let qr_code = QrCodeGenerator::new(req.url.as_bytes())
+    let qr_code = QrCodeGenerator::new(req_body.url.as_bytes())
         .map_err(|e| error::ErrorInternalServerError(format!("QR code generation error: {}", e)))?;
 
     // Render as SVG
@@ -179,9 +187,10 @@ pub async fn generate_direct_qr(
     // Create the QR code model
     let qr_model = QrCodeModel::new(
         unique_id.clone(),
-        req.url.clone(),
+        req_body.url.clone(),
         svg_output.clone(),
         TargetType::Original, // Direct QR codes always point to the original URL
+        user_id.clone(),
     );
 
     // Save the QR code to the database (upsert if it already exists)
@@ -190,7 +199,7 @@ pub async fn generate_direct_qr(
         qr_codes_collection
             .update_one(
                 doc! {
-                    "original_url": &req.url,
+                    "original_url": &req_body.url,
                     "short_code": { "$regex": "^direct-" },
                     "target_type": "original"
                 },
@@ -224,10 +233,17 @@ pub async fn generate_direct_qr(
 /// Get all QR codes
 pub async fn get_all_qr_codes(
     app_state: web::Data<AppState>,
+    req: HttpRequest,
     query: web::Query<QrSearchParams>,
 ) -> Result<impl Responder> {
     let db = &app_state.db;
     let qr_codes_collection = db.collection::<QrCodeModel>("qr_codes");
+
+    // Get current user ID from request
+    let current_user_id = req
+        .extensions()
+        .get::<Claims>()
+        .map(|claims| claims.user_id.clone());
 
     // Build filter based on search parameters
     let mut filter = doc! {};
@@ -256,6 +272,13 @@ pub async fn get_all_qr_codes(
         filter.insert("short_code", doc! { "$regex": "^direct-" });
     }
 
+    // Filter for user's own QR codes if requested
+    if query.owned_only.unwrap_or(false) {
+        if let Some(user_id) = &current_user_id {
+            filter.insert("user_id", user_id);
+        }
+    }
+
     // Find QR codes
     let cursor = qr_codes_collection
         .find(filter)
@@ -271,17 +294,27 @@ pub async fn get_all_qr_codes(
     // Transform to response objects
     let qr_responses: Vec<QrCodeResponse> = qr_codes
         .into_iter()
-        .map(|qr| QrCodeResponse {
-            id: qr.id.map_or_else(|| "".to_string(), |id| id.to_hex()),
-            short_code: qr.short_code.clone(),
-            original_url: qr.original_url,
-            generated_at: qr.generated_at,
-            svg_content: qr.svg_content,
-            target_type: match qr.target_type {
-                TargetType::Original => "original".to_string(),
-                TargetType::Shortened => "shortened".to_string(),
-            },
-            is_direct: qr.short_code.starts_with("direct-"),
+        .map(|qr| {
+            let owned_by_current_user = match (&current_user_id, &qr.user_id) {
+                (Some(current_id), Some(qr_id)) => current_id == qr_id,
+                _ => false,
+            };
+            let is_direct = qr.short_code.starts_with("direct-");
+
+            QrCodeResponse {
+                id: qr.id.map_or_else(|| "".to_string(), |id| id.to_hex()),
+                short_code: qr.short_code,
+                original_url: qr.original_url,
+                generated_at: qr.generated_at,
+                target_type: match qr.target_type {
+                    TargetType::Original => "original".to_string(),
+                    TargetType::Shortened => "shortened".to_string(),
+                },
+                is_direct,
+                owned_by_current_user,
+                user_id: qr.user_id,
+                svg_content: qr.svg_content,
+            }
         })
         .collect();
 

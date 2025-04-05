@@ -10,6 +10,7 @@ pub struct QrCode {
     pub svg_content: String,     // The SVG content of the QR code
     pub generated_at: i64,       // When the QR code was generated (timestamp in milliseconds)
     pub target_type: TargetType, // Whether the QR points to the original or shortened URL
+    pub user_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -26,6 +27,7 @@ impl QrCode {
         original_url: String,
         svg_content: String,
         target_type: TargetType,
+        user_id: Option<String>,
     ) -> Self {
         Self {
             id: None,
@@ -34,6 +36,7 @@ impl QrCode {
             svg_content,
             generated_at: chrono::Utc::now().timestamp_millis(),
             target_type,
+            user_id,
         }
     }
 }

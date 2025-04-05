@@ -46,6 +46,7 @@ async fn main() -> std::io::Result<()> {
             .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
             .allowed_headers(vec![http::header::AUTHORIZATION, http::header::ACCEPT])
             .allowed_header(http::header::CONTENT_TYPE)
+            .supports_credentials()
             .max_age(3600);
         App::new()
             .wrap(logger)

@@ -20,6 +20,8 @@ pub struct UrlListResponse {
     pub has_original_qr: bool,
     pub clicks: i64,
     pub unique_clicks: usize,
+    pub user_id: Option<String>,
+    pub owned_by_current_user: bool,
 }
 
 #[derive(Serialize)]
@@ -28,11 +30,13 @@ pub struct UrlResponse {
     pub short_url: String,
     pub short_code: String,
     pub expires_at: Option<i64>,
+    pub user_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct UrlSearchParams {
     pub search: Option<String>,
+    pub owned_only: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -47,4 +51,5 @@ pub struct UrlAnalyticsResponse {
     pub has_original_qr: bool,
     pub shortened_qr_generated_at: Option<i64>,
     pub original_qr_generated_at: Option<i64>,
+    pub user_id: Option<String>,
 }

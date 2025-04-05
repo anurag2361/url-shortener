@@ -1,4 +1,4 @@
-use actix_web::{HttpRequest, HttpResponse, Responder, Result, error, http, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, Responder, Result, error, http, web};
 use futures_util::StreamExt;
 use mongodb::bson::doc;
 use nanoid::nanoid;
@@ -13,22 +13,30 @@ use crate::structs::url_request::{
     UrlAnalyticsResponse, UrlListResponse, UrlRequest, UrlResponse, UrlSearchParams,
 };
 use crate::utils::hash_ip::hash_ip;
+use crate::utils::jwt::Claims;
 
 /// Create a shortened URL
 pub async fn create_short_url(
     app_state: web::Data<AppState>,
-    web::Json(req): web::Json<UrlRequest>,
+    req: HttpRequest,
+    web::Json(req_body): web::Json<UrlRequest>,
 ) -> Result<impl Responder> {
     // Validate the URL
-    if let Err(errors) = req.validate() {
+    if let Err(errors) = req_body.validate() {
         return Ok(HttpResponse::BadRequest().json(errors));
     }
+
+    // Get user ID from request extensions
+    let user_id = req
+        .extensions()
+        .get::<Claims>()
+        .map(|claims| claims.user_id.clone());
 
     let db = &app_state.db;
     let urls_collection = db.collection::<ShortenedUrl>("urls");
 
     // Generate short code - either use custom or generate random
-    let short_code = match req.custom_code {
+    let short_code = match req_body.custom_code {
         Some(code) if !code.is_empty() => {
             // Check if custom code already exists
             let existing = urls_collection
@@ -48,7 +56,12 @@ pub async fn create_short_url(
     };
 
     // Create new shortened URL
-    let shortened_url = ShortenedUrl::new(req.url.clone(), short_code.clone(), req.expires_in_days);
+    let shortened_url = ShortenedUrl::new(
+        req_body.url.clone(),
+        short_code.clone(),
+        req_body.expires_in_days,
+        user_id,
+    );
 
     // Save to database
     urls_collection
@@ -62,10 +75,11 @@ pub async fn create_short_url(
 
     // Return response
     let response = UrlResponse {
-        original_url: req.url,
+        original_url: req_body.url,
         short_url,
         short_code,
         expires_at: shortened_url.expires_at,
+        user_id: shortened_url.user_id,
     };
 
     Ok(HttpResponse::Created().json(response))
@@ -163,6 +177,7 @@ pub async fn redirect_to_url(
 
 pub async fn get_all_urls(
     app_state: web::Data<AppState>,
+    req: HttpRequest,
     query: web::Query<UrlSearchParams>,
 ) -> Result<impl Responder> {
     let db = &app_state.db;
@@ -170,26 +185,42 @@ pub async fn get_all_urls(
     let visitors_collection = db.collection::<UrlVisitor>("visitors");
     let qr_codes_collection = db.collection::<QrCode>("qr_codes");
 
-    // Create filter based on search parameter
-    let filter = match &query.search {
-        Some(search_term) if !search_term.is_empty() => {
-            doc! {
-                "original_url": {
-                    "$regex": search_term,
-                    "$options": "i"  // case-insensitive
-                }
-            }
-        }
-        _ => doc! {}, // Empty filter returns all documents
-    };
+    // Get current user ID from request
+    let current_user_id = req
+        .extensions()
+        .get::<Claims>()
+        .map(|claims| claims.user_id.clone());
 
-    // Find URLs with the filter
+    // Build filter
+    let mut filter = doc! {};
+
+    // Add search filter if provided
+    if let Some(search) = &query.search {
+        if !search.is_empty() {
+            filter = doc! {
+                "$or": [
+                    { "short_code": { "$regex": search, "$options": "i" } },
+                    { "original_url": { "$regex": search, "$options": "i" } }
+                ]
+            };
+        }
+    }
+
+    // Filter for user's own URLs if requested
+    if query.owned_only.unwrap_or(false) {
+        if let Some(user_id) = &current_user_id {
+            filter.insert("user_id", user_id);
+        }
+    }
+
+    // Find URLs matching the filter
     let mut cursor = urls_collection
         .find(filter)
         .await
         .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
 
     let mut urls = Vec::new();
+
     while let Some(result) = cursor.next().await {
         if let Ok(url) = result {
             // Convert ObjectId to string
@@ -223,6 +254,12 @@ pub async fn get_all_urls(
                 .unwrap_or(0)
                 > 0;
 
+            // Determine if this URL is owned by the current user
+            let owned_by_current_user = match (&current_user_id, &url.user_id) {
+                (Some(current_id), Some(url_id)) => current_id == url_id,
+                _ => false,
+            };
+
             urls.push(UrlListResponse {
                 id: id_str,
                 original_url: url.original_url,
@@ -233,6 +270,8 @@ pub async fn get_all_urls(
                 has_original_qr,
                 clicks: url.clicks,
                 unique_clicks: unique_visitor_count,
+                owned_by_current_user,
+                user_id: url.user_id,
             });
         }
     }
@@ -342,6 +381,7 @@ pub async fn get_url_analytics(
                 has_original_qr,
                 shortened_qr_generated_at,
                 original_qr_generated_at,
+                user_id: url.user_id,
             };
 
             Ok(HttpResponse::Ok().json(analytics))
