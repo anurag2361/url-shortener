@@ -42,6 +42,7 @@ async fn main() -> std::io::Result<()> {
         // Enable CORS for all origins
         let cors = Cors::default()
             .allowed_origin("http://localhost:5173") // Default Bun dev server port
+            .allowed_origin("http://localhost:4173")
             .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
             .allowed_headers(vec![http::header::AUTHORIZATION, http::header::ACCEPT])
             .allowed_header(http::header::CONTENT_TYPE)

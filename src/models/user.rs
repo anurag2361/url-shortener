@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
@@ -43,18 +42,6 @@ impl User {
             last_login: None,
             is_active: true,
         }
-    }
-
-    pub fn is_superuser(&self) -> bool {
-        self.roles.iter().any(|role| role.is_superuser())
-    }
-
-    pub fn has_role(&self, role: &Role) -> bool {
-        self.is_superuser() || self.roles.contains(role)
-    }
-
-    pub fn has_any_role(&self, roles: &[Role]) -> bool {
-        self.is_superuser() || self.roles.iter().any(|role| roles.contains(role))
     }
 
     pub fn update_last_login(&mut self) {

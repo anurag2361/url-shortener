@@ -9,8 +9,8 @@ use crate::models::qr_code::{QrCode as QrCodeModel, TargetType};
 use crate::models::url::ShortenedUrl;
 use crate::state::app_state::AppState;
 use crate::structs::qr_request::{CreateQrRequest, RegenerateQrParams};
+use crate::structs::qr_request::{QrCodeResponse, QrSearchParams};
 use futures_util::TryStreamExt;
-use serde::{Deserialize, Serialize};
 
 pub async fn regenerate_qr(
     app_state: web::Data<AppState>,
@@ -219,26 +219,6 @@ pub async fn generate_direct_qr(
     Ok(HttpResponse::Ok()
         .content_type("image/svg+xml")
         .body(svg_output))
-}
-
-// New struct for QR code response
-#[derive(Serialize)]
-pub struct QrCodeResponse {
-    pub id: String,
-    pub short_code: String,
-    pub original_url: String,
-    pub generated_at: i64,
-    pub target_type: String,
-    pub is_direct: bool,
-    pub svg_content: String,
-}
-
-// New struct for QR code search parameters
-#[derive(Deserialize)]
-pub struct QrSearchParams {
-    pub search: Option<String>,
-    pub target_type: Option<String>,
-    pub direct_only: Option<bool>,
 }
 
 /// Get all QR codes
