@@ -91,13 +91,7 @@ pub async fn create_user(
         .map_err(|e| error::ErrorInternalServerError(format!("Failed to hash password: {}", e)))?;
 
     // Create new user
-    let new_user = User::new(
-        req.username,
-        req.email,
-        req.full_name,
-        password_hash,
-        req.roles,
-    );
+    let new_user = User::new(req.username, req.email, req.full_name, password_hash);
 
     // Insert into database
     let result = users_collection
@@ -165,13 +159,6 @@ pub async fn edit_user(
             .get_document_mut("$set")
             .unwrap()
             .insert("password_hash", password_hash);
-    }
-
-    if let Some(roles) = req.roles {
-        update_doc
-            .get_document_mut("$set")
-            .unwrap()
-            .insert("roles", mongodb::bson::to_bson(&roles).unwrap());
     }
 
     if let Some(is_active) = req.is_active {

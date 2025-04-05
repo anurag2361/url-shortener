@@ -1,8 +1,6 @@
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
-use crate::models::role::Role;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
@@ -13,7 +11,6 @@ pub struct User {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub full_name: Option<String>,
     pub password_hash: String,
-    pub roles: Vec<Role>,
     pub created_at: i64,
     pub updated_at: i64,
     pub last_login: Option<i64>,
@@ -26,7 +23,6 @@ impl User {
         email: Option<String>,
         full_name: Option<String>,
         password_hash: String,
-        roles: Vec<Role>,
     ) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
 
@@ -36,7 +32,6 @@ impl User {
             email,
             full_name,
             password_hash,
-            roles,
             created_at: now,
             updated_at: now,
             last_login: None,
@@ -56,7 +51,6 @@ pub struct UserResponse {
     pub username: String,
     pub email: Option<String>,
     pub full_name: Option<String>,
-    pub roles: Vec<Role>,
     pub created_at: i64,
     pub last_login: Option<i64>,
     pub is_active: bool,
@@ -69,7 +63,6 @@ impl From<User> for UserResponse {
             username: user.username,
             email: user.email,
             full_name: user.full_name,
-            roles: user.roles,
             created_at: user.created_at,
             last_login: user.last_login,
             is_active: user.is_active,

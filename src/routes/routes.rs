@@ -9,8 +9,7 @@ use crate::handlers::url_handlers::{
 use crate::handlers::user_handlers::{
     create_user, delete_user, edit_user, get_all_users, get_user,
 };
-use crate::middlewares::authmw::{JwtAuth, RequireRoles};
-use crate::models::role::Role;
+use crate::middlewares::authmw::JwtAuth;
 
 /// Configure the routes
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
@@ -27,40 +26,19 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/api")
             .wrap(JwtAuth)
             .route("/shorten", web::post().to(create_short_url))
-            .service(
-                web::resource("/urls")
-                    .wrap(RequireRoles(vec![Role::UrlViewer, Role::UrlManager]))
-                    .route(web::get().to(get_all_urls)),
-            )
+            .service(web::resource("/urls").route(web::get().to(get_all_urls)))
             .route("/health/check", web::get().to(health_check))
-            .service(
-                web::resource("/qr/{code}/regenerate")
-                    .wrap(RequireRoles(vec![Role::QrManager]))
-                    .route(web::get().to(regenerate_qr)),
-            )
-            .service(
-                web::resource("/qr/{code}/info")
-                    .wrap(RequireRoles(vec![Role::QrViewer, Role::QrManager]))
-                    .route(web::get().to(get_qr_code_direct)),
-            )
-            .service(
-                web::resource("/analytics/{code}")
-                    .wrap(RequireRoles(vec![
-                        Role::AnalyticsViewer,
-                        Role::AnalyticsManager,
-                    ]))
-                    .route(web::get().to(get_url_analytics)),
-            )
+            .service(web::resource("/qr/{code}/regenerate").route(web::get().to(regenerate_qr)))
+            .service(web::resource("/qr/{code}/info").route(web::get().to(get_qr_code_direct)))
+            .service(web::resource("/analytics/{code}").route(web::get().to(get_url_analytics)))
             .service(
                 web::resource("/qr")
-                    .wrap(RequireRoles(vec![Role::QrCreator, Role::QrManager]))
                     .route(web::post().to(generate_direct_qr))
                     .route(web::get().to(get_all_qr_codes)),
             )
             // User management routes - require superuser role
             .service(
                 web::scope("/users")
-                    .wrap(RequireRoles(vec![Role::SuperUser]))
                     .route("/", web::get().to(get_all_users))
                     .route("/", web::post().to(create_user))
                     .route("/{user_id}", web::get().to(get_user))

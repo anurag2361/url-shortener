@@ -17,7 +17,6 @@ pub struct LoginRequest {
 pub struct LoginResponse {
     pub token: String,
     pub username: String,
-    pub roles: Vec<String>,
 }
 
 pub async fn login(
@@ -46,7 +45,7 @@ pub async fn login(
             }
 
             // Generate JWT token
-            let token = create_token(&user.username, &user.roles).map_err(|e| {
+            let token = create_token(&user.username).map_err(|e| {
                 error::ErrorInternalServerError(format!("Token generation failed: {}", e))
             })?;
 
@@ -62,13 +61,9 @@ pub async fn login(
                     error::ErrorInternalServerError(format!("Failed to update last login: {}", e))
                 })?;
 
-            // Return token and user info
-            let role_names: Vec<String> = user.roles.iter().map(|r| r.to_string()).collect();
-
             Ok(HttpResponse::Ok().json(LoginResponse {
                 token,
                 username: user.username,
-                roles: role_names,
             }))
         }
         None => Ok(HttpResponse::Unauthorized().json(serde_json::json!({
@@ -110,7 +105,6 @@ pub async fn create_superuser(app_state: web::Data<AppState>) -> Result<HttpResp
         Some("admin@example.com".to_string()),
         Some("Super User".to_string()),
         password_hash,
-        vec![crate::models::role::Role::SuperUser],
     );
 
     // Insert into database

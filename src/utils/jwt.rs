@@ -3,48 +3,39 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode}
 use serde::{Deserialize, Serialize};
 use std::env;
 
-use crate::models::role::Role;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String, // Subject (username)
-    pub roles: Vec<Role>,
-    pub exp: usize, // Expiration time (as UTC timestamp)
-    pub iat: usize, // Issued at (as UTC timestamp)
+    pub exp: usize,  // Expiration time
+    pub iat: usize,  // Issued at
 }
 
-pub fn create_token(username: &str, roles: &[Role]) -> Result<String> {
-    let jwt_secret = env::var("JWT_SECRET").context("JWT_SECRET not set")?;
+pub fn create_token(username: &str) -> Result<String> {
+    let expiration = chrono::Utc::now()
+        .checked_add_signed(chrono::Duration::days(10))
+        .context("Invalid timestamp")?
+        .timestamp() as usize;
 
-    let now = chrono::Utc::now();
-    let expiry = now + chrono::Duration::days(10); // 10 days validity
+    let issued_at = chrono::Utc::now().timestamp() as usize;
 
     let claims = Claims {
-        sub: username.to_string(),
-        roles: roles.to_vec(),
-        exp: expiry.timestamp() as usize,
-        iat: now.timestamp() as usize,
+        sub: username.to_owned(),
+        exp: expiration,
+        iat: issued_at,
     };
 
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(jwt_secret.as_bytes()),
-    )
-    .context("Failed to encode JWT")?;
+    let secret = env::var("JWT_SECRET").context("JWT_SECRET must be set")?;
+    let encoding_key = EncodingKey::from_secret(secret.as_bytes());
 
-    Ok(token)
+    encode(&Header::default(), &claims, &encoding_key).context("Failed to create token")
 }
 
 pub fn validate_token(token: &str) -> Result<Claims> {
-    let jwt_secret = env::var("JWT_SECRET").context("JWT_SECRET not set")?;
+    let secret = env::var("JWT_SECRET").context("JWT_SECRET must be set")?;
+    let decoding_key = DecodingKey::from_secret(secret.as_bytes());
 
-    let token_data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(jwt_secret.as_bytes()),
-        &Validation::default(),
-    )
-    .context("Failed to decode JWT")?;
+    let token_data = decode::<Claims>(token, &decoding_key, &Validation::default())
+        .context("Failed to validate token")?;
 
     Ok(token_data.claims)
 }
