@@ -320,3 +320,101 @@ pub async fn get_all_qr_codes(
 
     Ok(HttpResponse::Ok().json(qr_responses))
 }
+
+// New handler that lists QR codes for a specific user
+pub async fn get_user_qr_codes(
+    app_state: web::Data<AppState>,
+    req: HttpRequest,
+    path: web::Path<String>,
+    query: web::Query<QrSearchParams>,
+) -> Result<impl Responder> {
+    let user_id = path.into_inner();
+    let db = &app_state.db;
+    let qr_codes_collection = db.collection::<QrCodeModel>("qr_codes");
+
+    // Get current user ID from request
+    let current_user_id = req
+        .extensions()
+        .get::<Claims>()
+        .map(|claims| claims.user_id.clone());
+
+    // Build filter based on search parameters
+    let mut filter = doc! { "user_id": &user_id };
+
+    // Filter by search term if provided
+    if let Some(search) = &query.search {
+        if !search.is_empty() {
+            // Combine user_id with search
+            filter = doc! {
+                "$and": [
+                    { "user_id": &user_id },
+                    { "$or": [
+                        { "short_code": { "$regex": search, "$options": "i" } },
+                        { "original_url": { "$regex": search, "$options": "i" } }
+                    ]}
+                ]
+            };
+        }
+    }
+
+    // Filter by target type if provided
+    if let Some(target_type) = &query.target_type {
+        if target_type == "original" || target_type == "shortened" {
+            if let Some(and_array) = filter.get_array_mut("$and").ok() {
+                and_array.push(doc! { "target_type": target_type }.into());
+            } else {
+                filter.insert("target_type", target_type);
+            }
+        }
+    }
+
+    // Filter direct QR codes if requested
+    if query.direct_only.unwrap_or(false) {
+        if let Some(and_array) = filter.get_array_mut("$and").ok() {
+            and_array.push(doc! { "short_code": { "$regex": "^direct-" } }.into());
+        } else {
+            filter.insert("short_code", doc! { "$regex": "^direct-" });
+        }
+    }
+
+    // Find QR codes
+    let cursor = qr_codes_collection
+        .find(filter)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+    // Process results
+    let qr_codes = cursor
+        .try_collect::<Vec<QrCodeModel>>()
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+    // Transform to response objects
+    let qr_responses: Vec<QrCodeResponse> = qr_codes
+        .into_iter()
+        .map(|qr| {
+            let owned_by_current_user = match (&current_user_id, &qr.user_id) {
+                (Some(current_id), Some(qr_id)) => current_id == qr_id,
+                _ => false,
+            };
+
+            let short_code = qr.short_code.clone();
+            QrCodeResponse {
+                id: qr.id.map_or_else(|| "".to_string(), |id| id.to_hex()),
+                short_code: short_code.clone(),
+                original_url: qr.original_url,
+                generated_at: qr.generated_at,
+                target_type: match qr.target_type {
+                    TargetType::Original => "original".to_string(),
+                    TargetType::Shortened => "shortened".to_string(),
+                },
+                is_direct: short_code.starts_with("direct-"),
+                owned_by_current_user,
+                user_id: qr.user_id,
+                svg_content: qr.svg_content,
+            }
+        })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(qr_responses))
+}

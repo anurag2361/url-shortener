@@ -391,3 +391,107 @@ pub async fn get_url_analytics(
         }))),
     }
 }
+
+// New handler that lists URLs for a specific user
+pub async fn get_user_urls(
+    app_state: web::Data<AppState>,
+    req: HttpRequest,
+    path: web::Path<String>,
+    query: web::Query<UrlSearchParams>,
+) -> Result<impl Responder> {
+    let user_id = path.into_inner();
+    let db = &app_state.db;
+    let urls_collection = db.collection::<ShortenedUrl>("urls");
+    let visitors_collection = db.collection::<UrlVisitor>("visitors");
+    let qr_codes_collection = db.collection::<QrCode>("qr_codes");
+
+    // Get current user ID from request
+    let current_user_id = req
+        .extensions()
+        .get::<Claims>()
+        .map(|claims| claims.user_id.clone());
+
+    // Build filter
+    let mut filter = doc! { "user_id": &user_id };
+
+    // Add search filter if provided
+    if let Some(search) = &query.search {
+        if !search.is_empty() {
+            // This is a bit more complex now - we need to combine user_id with search
+            filter = doc! {
+                "$and": [
+                    { "user_id": &user_id },
+                    { "$or": [
+                        { "short_code": { "$regex": search, "$options": "i" } },
+                        { "original_url": { "$regex": search, "$options": "i" } }
+                    ]}
+                ]
+            };
+        }
+    }
+
+    // Find URLs matching the filter
+    let mut cursor = urls_collection
+        .find(filter)
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?;
+
+    let mut urls = Vec::new();
+
+    while let Some(result) = cursor.next().await {
+        if let Ok(url) = result {
+            // Convert ObjectId to string
+            let id_str = url.id.map(|oid| oid.to_hex());
+
+            // Get the short code
+            let short_code = url.short_code.clone();
+
+            // Count unique visitors for this URL
+            let unique_visitor_count = visitors_collection
+                .count_documents(doc! {"short_code": &short_code})
+                .await
+                .unwrap_or(0) as usize;
+
+            // Check if QR codes exist for this URL
+            let has_shortened_qr = qr_codes_collection
+                .count_documents(doc! {
+                    "short_code": &short_code,
+                    "target_type": "shortened"
+                })
+                .await
+                .unwrap_or(0)
+                > 0;
+
+            let has_original_qr = qr_codes_collection
+                .count_documents(doc! {
+                    "short_code": &short_code,
+                    "target_type": "original"
+                })
+                .await
+                .unwrap_or(0)
+                > 0;
+
+            // Determine if this URL is owned by the current user
+            let owned_by_current_user = match (&current_user_id, &url.user_id) {
+                (Some(current_id), Some(url_id)) => current_id == url_id,
+                _ => false,
+            };
+
+            urls.push(UrlListResponse {
+                id: id_str,
+                original_url: url.original_url,
+                short_code,
+                created_at: url.created_at,
+                expires_at: url.expires_at,
+                has_shortened_qr,
+                has_original_qr,
+                clicks: url.clicks,
+                unique_clicks: unique_visitor_count,
+                owned_by_current_user,
+                user_id: url.user_id,
+            });
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(urls))
+}
