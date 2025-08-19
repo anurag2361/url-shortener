@@ -7,7 +7,7 @@ use crate::handlers::qr_handlers::{
 };
 use crate::handlers::url_handlers::{
     create_short_url, get_all_urls, get_qr_code_direct, get_url_analytics, get_user_urls,
-    redirect_to_url,
+    redirect_to_url,delete_short_url
 };
 use crate::handlers::user_handlers::{
     create_user, delete_user, edit_user, get_all_users, get_user,
@@ -32,6 +32,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             .wrap(JwtAuth)
             .route("/shorten", web::post().to(create_short_url))
             .route("/urls", web::get().to(get_all_urls))
+            .route("/urls/{code}", web::delete().to(delete_short_url))
             .service(
                 web::resource("/users/{user_id}/urls")
                     .wrap(ResourceOwnership {

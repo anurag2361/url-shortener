@@ -495,3 +495,58 @@ pub async fn get_user_urls(
 
     Ok(HttpResponse::Ok().json(urls))
 }
+
+/// Delete a shortened URL
+pub async fn delete_short_url(
+    app_state: web::Data<AppState>,
+    req: HttpRequest,
+    path: web::Path<String>,
+) -> Result<impl Responder> {
+    let code = path.into_inner();
+    let db = &app_state.db;
+
+    let urls_collection = db.collection::<ShortenedUrl>("urls");
+    let qr_codes_collection = db.collection::<QrCode>("qr_codes");
+    let visitors_collection = db.collection::<UrlVisitor>("visitors");
+
+    // Get the current user's ID from the token claims
+    let extensions = req.extensions();
+    let claims = extensions
+        .get::<Claims>()
+        .ok_or_else(|| error::ErrorInternalServerError("User claims not found in request"))?
+        .clone();
+
+    // Find the URL to be deleted
+    let url_to_delete = urls_collection
+        .find_one(doc! { "short_code": &code })
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Database error: {}", e)))?
+        .ok_or_else(|| error::ErrorNotFound("URL not found"))?;
+
+    // --- Ownership Check ---
+    // Ensure the user deleting the URL is the one who created it
+    if url_to_delete.user_id.as_deref() != Some(&claims.user_id) {
+        // You could also allow admins to delete any URL here
+        return Err(error::ErrorForbidden("You do not have permission to delete this URL"));
+    }
+
+    // Delete the URL document
+    urls_collection
+        .delete_one(doc! { "_id": url_to_delete.id })
+        .await
+        .map_err(|e| error::ErrorInternalServerError(format!("Failed to delete URL: {}", e)))?;
+
+    // Delete associated QR codes
+    qr_codes_collection
+        .delete_many(doc! { "short_code": &code })
+        .await
+        .ok(); // Use .ok() to ignore errors if deletion fails
+
+    // Delete associated visitor analytics
+    visitors_collection
+        .delete_many(doc! { "short_code": &code })
+        .await
+        .ok(); // Use .ok() to ignore errors if deletion fails
+
+    Ok(HttpResponse::NoContent().finish())
+}
