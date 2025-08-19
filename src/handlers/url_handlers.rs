@@ -513,8 +513,7 @@ pub async fn delete_short_url(
     let extensions = req.extensions();
     let claims = extensions
         .get::<Claims>()
-        .ok_or_else(|| error::ErrorInternalServerError("User claims not found in request"))?
-        .clone();
+        .ok_or_else(|| error::ErrorInternalServerError("User claims not found in request"))?;
 
     // Find the URL to be deleted
     let url_to_delete = urls_collection
